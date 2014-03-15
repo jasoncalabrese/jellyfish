@@ -26,6 +26,7 @@ var config = require('./env.js');
 var log = require('./lib/log.js')('app.js');
 var uploads = require('./lib/uploads.js')(config);
 var webClient = require('./lib/webclient.js');
+var entries = require('./lib/entries.js');
 
 var jsonp = function(response) {
   return function(error, data) {
@@ -114,6 +115,47 @@ var jsonp = function(response) {
           }
 
           uploadFlow.ingest(req, { groupId: hashPair.id }, jsonp(res));
+        }
+      );
+    }
+  );
+
+  //TODO: not very DRY
+  app.post(
+    '/v1/device/realtime',
+    checkToken,
+    express.json({strict: true}),
+    function(req, res) {
+      async.waterfall(
+        [
+          function(cb) {
+            userApiClient.withServerToken(cb);
+          },
+          function(token, cb) {
+            seagullClient.getPrivatePair(req._tokendata.userid, 'uploads', token, cb);
+          }
+        ],
+        function(err, hashPair) {
+          if (err != null) {
+            if (err.statusCode === undefined) {
+              log.warn(err, 'Failed to get private pair for user[%s]', req._tokendata.userid);
+              res.send(500);
+            }
+            else {
+              res.send(err.statusCode, err.message);
+            }
+            return;
+          }
+
+          if (hashPair == null) {
+            log.warn('Unable to get hashPair, something is broken...');
+            res.send(503);
+            return;
+          }
+
+          var body = req.body;
+          body.groupId = hashPair.id;
+          entries.add(body, jsonp(res));
         }
       );
     }
